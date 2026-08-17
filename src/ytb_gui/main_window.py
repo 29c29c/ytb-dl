@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self.cookie_browser.addItem("不使用 Cookie", None)
         self.cookie_browser.addItem("Chrome", "chrome")
         self.cookie_browser.addItem("Edge", "edge")
+        self.cookie_browser.addItem("Firefox", "firefox")
         self.cookie_profile = QLineEdit()
         self.cookie_profile.setPlaceholderText("可选：浏览器 Profile 名称或目录")
         self.max_items = QSpinBox()

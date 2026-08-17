@@ -6,9 +6,11 @@ from ytb_gui.models import FormatRule, ScanRequest
 
 class FakeYoutubeDL:
     root_result = None
+    last_options = None
 
     def __init__(self, options=None):
         self.options = options or {}
+        type(self).last_options = self.options
 
     def __enter__(self):
         return self
@@ -81,6 +83,23 @@ class BackendTests(unittest.TestCase):
         }
         events = list(FakeBackend().scan(ScanRequest("https://youtube.com/@x", max_items=2), cancelled=lambda: False))
         self.assertEqual(len(events), 2)
+
+    def test_scan_passes_firefox_profile_to_yt_dlp(self):
+        FakeYoutubeDL.root_result = {"entries": []}
+        list(
+            FakeBackend().scan(
+                ScanRequest(
+                    "https://youtube.com/playlist?list=x",
+                    cookie_browser="firefox",
+                    cookie_profile="default-release",
+                ),
+                cancelled=lambda: False,
+            )
+        )
+        self.assertEqual(
+            FakeYoutubeDL.last_options["cookiesfrombrowser"],
+            ("firefox", "default-release", None, None),
+        )
 
 
 if __name__ == "__main__":
