@@ -1,7 +1,9 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from ytb_gui.backend import BackendError, YtDlpBackend, item_from_info, needs_enrichment
-from ytb_gui.models import FormatRule, ScanRequest
+from ytb_gui.models import DownloadJob, FormatRule, ScanRequest, VideoItem
 
 
 class FakeYoutubeDL:
@@ -84,6 +86,30 @@ class BackendTests(unittest.TestCase):
         events = list(FakeBackend().scan(ScanRequest("https://youtube.com/@x", max_items=2), cancelled=lambda: False))
         self.assertEqual(len(events), 2)
 
+    def test_conservative_scan_skips_size_only_enrichment(self):
+        FakeYoutubeDL.root_result = {
+            "entries": [
+                {
+                    "id": "abc",
+                    "title": "Example",
+                    "channel": "Uploader",
+                    "extractor_key": "Youtube",
+                    "url": "https://youtube.com/watch?v=abc",
+                }
+            ]
+        }
+        events = list(
+            FakeBackend().scan(
+                ScanRequest("https://youtube.com/playlist?list=x"),
+                cancelled=lambda: False,
+            )
+        )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0][0], "add")
+        self.assertFalse(events[0][1].size_pending)
+        self.assertEqual(FakeYoutubeDL.last_options["sleep_interval_requests"], 2.0)
+        self.assertEqual(FakeYoutubeDL.last_options["extractor_retries"], 3)
+
     def test_scan_passes_firefox_profile_to_yt_dlp(self):
         FakeYoutubeDL.root_result = {"entries": []}
         list(
@@ -100,6 +126,33 @@ class BackendTests(unittest.TestCase):
             FakeYoutubeDL.last_options["cookiesfrombrowser"],
             ("firefox", "default-release", None, None),
         )
+
+    def test_download_uses_conservative_delays_and_retries(self):
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp)
+            FakeYoutubeDL.root_result = {"filepath": str(destination / "video.mp4")}
+            job = DownloadJob(
+                VideoItem(
+                    "abc",
+                    "Example",
+                    "Uploader",
+                    "2026-01-01",
+                    "https://youtube.com/watch?v=abc",
+                ),
+                destination,
+                FormatRule(),
+            )
+            FakeBackend().download(
+                job,
+                cancelled=lambda: False,
+                on_progress=lambda _progress: None,
+            )
+
+        self.assertEqual(FakeYoutubeDL.last_options["sleep_interval_requests"], 2.0)
+        self.assertEqual(FakeYoutubeDL.last_options["sleep_interval"], 5.0)
+        self.assertEqual(FakeYoutubeDL.last_options["max_sleep_interval"], 10.0)
+        self.assertEqual(FakeYoutubeDL.last_options["retries"], 3)
+        self.assertEqual(FakeYoutubeDL.last_options["fragment_retries"], 3)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,9 @@ from .table_model import VideoFilterProxyModel, VideoTableModel
 from .workers import DownloadWorker, FormatProbeWorker, ScanWorker
 
 
+DEFAULT_MAX_SCAN_ITEMS = 100
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -97,7 +100,7 @@ class MainWindow(QMainWindow):
         self.max_items = QSpinBox()
         self.max_items.setRange(0, 1_000_000)
         self.max_items.setSpecialValueText("不限")
-        self.max_items.setToolTip("0 表示扫描全部")
+        self.max_items.setToolTip("保守模式默认扫描 100 项；0 表示扫描全部")
         auth_row.addWidget(QLabel("登录态"))
         auth_row.addWidget(self.cookie_browser)
         auth_row.addWidget(self.cookie_profile, 1)
@@ -221,7 +224,12 @@ class MainWindow(QMainWindow):
         browser_index = self.cookie_browser.findData(browser)
         self.cookie_browser.setCurrentIndex(max(browser_index, 0))
         self.cookie_profile.setText(str(self.settings.value("cookie_profile", "")))
-        self.max_items.setValue(int(self.settings.value("max_items", 0)))
+        if not self.settings.contains("conservative_defaults_v1"):
+            self.max_items.setValue(DEFAULT_MAX_SCAN_ITEMS)
+            self.settings.setValue("max_items", DEFAULT_MAX_SCAN_ITEMS)
+            self.settings.setValue("conservative_defaults_v1", True)
+        else:
+            self.max_items.setValue(int(self.settings.value("max_items", DEFAULT_MAX_SCAN_ITEMS)))
 
     def _save_settings(self) -> None:
         self.settings.setValue("destination", self.destination_input.text().strip())

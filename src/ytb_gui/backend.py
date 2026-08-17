@@ -11,6 +11,11 @@ from .models import DownloadJob, DownloadProgress, FormatInfo, ItemState, ScanRe
 StatusCallback = Callable[[str], None]
 ProgressCallback = Callable[[DownloadProgress], None]
 
+CONSERVATIVE_REQUEST_OPTIONS: dict[str, Any] = {
+    "sleep_interval_requests": 2.0,
+    "extractor_retries": 3,
+}
+
 
 class BackendError(RuntimeError):
     pass
@@ -94,12 +99,9 @@ def item_from_info(
 
 
 def needs_enrichment(item: VideoItem) -> bool:
-    return (
-        item.title == "未知标题"
-        or item.uploader == "未知"
-        or item.upload_date == "未知"
-        or item.size_pending
-    )
+    # Conservative mode avoids a full video request merely to fill in dates or
+    # estimated sizes. Only recover metadata required to identify the item.
+    return item.title == "未知标题" or item.uploader == "未知"
 
 
 class YtDlpBackend:
@@ -138,6 +140,7 @@ class YtDlpBackend:
             "ignoreerrors": True,
             "logger": _Logger(on_status),
         }
+        options.update(CONSERVATIVE_REQUEST_OPTIONS)
         options.update(_cookie_options(request.cookie_browser, request.cookie_profile))
 
         try:
@@ -163,6 +166,8 @@ class YtDlpBackend:
                     count += 1
                     if needs_enrichment(item) and item.webpage_url:
                         item.state = ItemState.ENRICHING
+                    else:
+                        item.size_pending = False
                     yield "add", item
 
                     if item.state is ItemState.ENRICHING and not cancelled():
@@ -174,6 +179,7 @@ class YtDlpBackend:
                                 "noplaylist": True,
                                 "logger": _Logger(on_status),
                             }
+                            full_options.update(CONSERVATIVE_REQUEST_OPTIONS)
                             full_options.update(_cookie_options(request.cookie_browser, request.cookie_profile))
                             with YoutubeDL(full_options) as detail_ydl:
                                 full = detail_ydl.extract_info(item.webpage_url, download=False)
@@ -210,6 +216,7 @@ class YtDlpBackend:
             "noplaylist": True,
             "logger": _Logger(on_status),
         }
+        options.update(CONSERVATIVE_REQUEST_OPTIONS)
         options.update(_cookie_options(cookie_browser, cookie_profile))
         try:
             with YoutubeDL(options) as ydl:
@@ -300,12 +307,15 @@ class YtDlpBackend:
             "overwrites": False,
             "continuedl": True,
             "nopart": False,
-            "retries": 10,
-            "fragment_retries": 10,
+            "retries": 3,
+            "fragment_retries": 3,
+            "sleep_interval": 5.0,
+            "max_sleep_interval": 10.0,
             "progress_hooks": [progress_hook],
             "postprocessor_hooks": [postprocessor_hook],
             "post_hooks": [after_move_hook],
         }
+        options.update(CONSERVATIVE_REQUEST_OPTIONS)
         options.update(build_download_options(job.rule))
         if job.format_override:
             options["format"] = job.format_override
