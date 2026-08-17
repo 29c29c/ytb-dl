@@ -1,0 +1,6 @@
+# Reproducible top-level dependency set verified for Python 3.10-3.14 on Windows.
+# Transitive packages are resolved by pip for the selected Python architecture.
+PySide6==6.11.1
+yt-dlp[default]==2026.7.4
+pytest==9.1.1
+
