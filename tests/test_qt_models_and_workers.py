@@ -2,10 +2,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
+    from PySide6.QtCore import QEventLoop, QThread, QTimer
     from PySide6.QtWidgets import QApplication
 
     HAS_QT = True
@@ -63,6 +65,41 @@ class QtModelTests(unittest.TestCase):
             self.assertTrue(any(key.endswith(":bad") and state == ItemState.FAILED.value for key, state, _ in states))
             self.assertTrue(any(key.endswith(":good") and state == ItemState.COMPLETED.value for key, state, _ in states))
             self.assertTrue(history.contains("youtube", "good"))
+
+    def test_scan_failure_dialog_runs_on_main_thread(self):
+        from PySide6.QtWidgets import QMessageBox
+
+        from ytb_gui.main_window import MainWindow
+
+        class FailingBackend:
+            def scan(self, *_args, **_kwargs):
+                raise RuntimeError("scan failed")
+
+        callback_threads = []
+
+        def record_warning(*_args, **_kwargs):
+            callback_threads.append(QThread.currentThread())
+            return QMessageBox.StandardButton.Ok
+
+        with tempfile.TemporaryDirectory() as temp, patch.dict(
+            os.environ, {"YTB_GUI_DATA_DIR": temp}
+        ), patch.object(QMessageBox, "warning", side_effect=record_warning):
+            window = MainWindow()
+            window.backend = FailingBackend()
+            window.url_input.setText("https://www.youtube.com/playlist?list=test")
+            window.start_scan()
+
+            thread = window.scan_thread
+            self.assertIsNotNone(thread)
+            loop = QEventLoop()
+            thread.finished.connect(loop.quit)
+            QTimer.singleShot(3000, loop.quit)
+            loop.exec()
+            self.app.processEvents()
+            window.close()
+
+        self.assertEqual(len(callback_threads), 1)
+        self.assertIs(callback_threads[0], self.app.thread())
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QSettings, QStandardPaths, QThread, Qt, QUrl
+from PySide6.QtCore import QSettings, QStandardPaths, QThread, Qt, QUrl, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -54,6 +54,7 @@ class MainWindow(QMainWindow):
         self.scan_worker: ScanWorker | None = None
         self.probe_thread: QThread | None = None
         self.probe_worker: FormatProbeWorker | None = None
+        self._probe_item_key: str | None = None
         self.download_thread: QThread | None = None
         self.download_worker: DownloadWorker | None = None
         self._download_paused = False
@@ -275,7 +276,7 @@ class MainWindow(QMainWindow):
         self.scan_worker.item_added.connect(self._add_scanned_item)
         self.scan_worker.item_updated.connect(self._update_scanned_item)
         self.scan_worker.status.connect(self.statusBar().showMessage)
-        self.scan_worker.failed.connect(lambda text: QMessageBox.warning(self, "扫描失败", friendly_error(text)))
+        self.scan_worker.failed.connect(self._show_scan_error)
         self.scan_worker.finished.connect(self._scan_finished)
         self.scan_worker.finished.connect(self.scan_thread.quit)
         self.scan_thread.finished.connect(self._cleanup_scan_thread)
@@ -284,6 +285,10 @@ class MainWindow(QMainWindow):
         self.queue_label.setText("正在扫描…")
         self.scan_thread.start()
         self._save_settings()
+
+    @Slot(str)
+    def _show_scan_error(self, text: str) -> None:
+        QMessageBox.warning(self, "扫描失败", friendly_error(text))
 
     def cancel_scan(self) -> None:
         if self.scan_worker:
@@ -381,6 +386,7 @@ class MainWindow(QMainWindow):
         if self.probe_thread and self.probe_thread.isRunning():
             return
         self.item_format_button.setEnabled(False)
+        self._probe_item_key = item.key
         self.probe_thread = QThread(self)
         self.probe_worker = FormatProbeWorker(
             self.backend,
@@ -391,11 +397,21 @@ class MainWindow(QMainWindow):
         self.probe_worker.moveToThread(self.probe_thread)
         self.probe_thread.started.connect(self.probe_worker.run)
         self.probe_worker.status.connect(self.statusBar().showMessage)
-        self.probe_worker.succeeded.connect(lambda formats, key=item.key: self._show_formats_dialog(key, formats))
-        self.probe_worker.failed.connect(lambda text: QMessageBox.warning(self, "格式获取失败", friendly_error(text)))
+        self.probe_worker.succeeded.connect(self._probe_succeeded)
+        self.probe_worker.failed.connect(self._show_probe_error)
         self.probe_worker.finished.connect(self.probe_thread.quit)
         self.probe_thread.finished.connect(self._cleanup_probe_thread)
         self.probe_thread.start()
+
+    @Slot(object)
+    def _probe_succeeded(self, formats: list) -> None:
+        key = self._probe_item_key
+        if key is not None:
+            self._show_formats_dialog(key, formats)
+
+    @Slot(str)
+    def _show_probe_error(self, text: str) -> None:
+        QMessageBox.warning(self, "格式获取失败", friendly_error(text))
 
     def _show_formats_dialog(self, key: str, formats: list) -> None:
         if not formats:
@@ -418,6 +434,7 @@ class MainWindow(QMainWindow):
             self.probe_thread.deleteLater()
         self.probe_worker = None
         self.probe_thread = None
+        self._probe_item_key = None
 
     def start_downloads(self) -> None:
         if self.download_thread and self.download_thread.isRunning():
